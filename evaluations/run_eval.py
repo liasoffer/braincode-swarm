@@ -51,7 +51,13 @@ SETUP_VERSION = "v2"
 ROUTE_CONCURRENCY = {"proxy": int(os.environ.get("EVAL_PROXY_CONCURRENCY", "4")),
                      "anthropic": int(os.environ.get("EVAL_ANTHROPIC_CONCURRENCY", "3")),
                      "openai": int(os.environ.get("EVAL_OPENAI_CONCURRENCY", "3"))}
-PASSTHROUGH_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+ROUTE_KEYS = {"anthropic": ("ANTHROPIC_API_KEY",), "openai": ("OPENAI_API_KEY",)}
+
+
+def route_keys(model: dict) -> tuple:
+    """Provider keys a container needs: only its own route's (the proxy key is
+    always passed by build_docker_cmd)."""
+    return ROUTE_KEYS.get(model["route"], ())
 TIMEOUT_S = int(os.environ.get("EVAL_TIMEOUT", "2400"))
 _cost_lock = threading.Lock()
 # Evaluation containers are named <prefix><model>-...; a process cleans up only
@@ -269,9 +275,10 @@ def translate_one(model: dict, item: dict, k: int, run: str, image: str, retriev
             extra_mounts=[(work / "item_raw.txt", "/item_raw.txt"), (work / "rag_context.md", "/rag_context.md"),
                           (work / "needs.json", "/needs.json"), (lf.KIT_DIR, "/kit"),
                           (lf.DOC_FORMATS_DIR, "/doc_formats"), (attach, "/attach")],
-            writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=PASSTHROUGH_KEYS)
+            writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=route_keys(model))
         with sems[model["route"]]:
             proc, duration, used = tb.run_container_logged(cmd, container, TIMEOUT_S, out_dir / f"attempt{attempt}.log")
+        utils.scrub_secrets(out_dir)   # an agent running `env` would log the keys
         used = {**used, **tb.collect_context_log(work / "session", used, out_dir / f"attempt{attempt}.context.jsonl")}
         for key, value in used.items():
             usage[key] = usage.get(key, 0) + value
@@ -453,10 +460,11 @@ def backtranslate_one(model: dict, fwd_dir: Path, item: dict, run: str, image: s
         None, None, model["pi_model"], d / "reference", work / "trajectory.txt", work / "prompt.md", work / "out",
         image, container_name=container, add_host=True,
         extra_mounts=[(lf.KIT_DIR, "/kit"), (work / "attach", "/attach")],
-        writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=PASSTHROUGH_KEYS)
+        writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=route_keys(model))
     started = time.monotonic()
     with sems[model["route"]]:
         proc, duration, used = tb.run_container_logged(cmd, container, TIMEOUT_S, back / "attempt1.log")
+    utils.scrub_secrets(back)   # an agent running `env` would log the keys
     used = {**used, **tb.collect_context_log(work / "session", used, back / "attempt1.context.jsonl")}
     recon = work / "out" / "reconstruction.md"
     status = "ok" if recon.exists() and recon.read_text(encoding="utf-8").strip() and proc.returncode == 0 else "error"

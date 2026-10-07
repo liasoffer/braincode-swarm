@@ -152,10 +152,11 @@ def run_step(step: str, model: dict, item: dict, image: str, sems: dict) -> dict
             None, None, model["pi_model"], work / "empty_reference", work / "trajectory.txt", work / "prompt.md",
             work / "out", image, container_name=container, add_host=True,
             extra_mounts=[(work / "attach", "/attach")], writable_mounts=[(work / "session", "/session")],
-            extra_env=env, passthrough_env=run_eval.PASSTHROUGH_KEYS)
+            extra_env=env, passthrough_env=run_eval.route_keys(model))
         with sems[model["route"]]:
             proc, _, used = tb.run_container_logged(cmd, container, run_eval.TIMEOUT_S,
                                                     out_dir / f"attempt{attempt}.log")
+        utils.scrub_secrets(out_dir)   # an agent running `env` would log the keys
         used = {**used, **tb.collect_context_log(work / "session", used, out_dir / f"attempt{attempt}.context.jsonl")}
         for k, v in used.items():
             usage[k] = usage.get(k, 0) + v

@@ -424,6 +424,33 @@ def reserve_name(base: str, names: set, names_lock: threading.Lock) -> str:
         return name
 
 
+SECRET_ENV_NAMES = ("PROXY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN")
+
+
+def scrub_secrets(root: Path) -> int:
+    """Replace API key values from this process's env with REDACTED in every
+    file under `root` (an agent that runs `env` would otherwise write them
+    into its session log). Returns the number of files rewritten."""
+    secrets = [v for v in (os.environ.get(n) for n in SECRET_ENV_NAMES) if v and len(v) >= 8]
+    if not secrets or not root.exists():
+        return 0
+    changed = 0
+    for path in (root.rglob("*") if root.is_dir() else [root]):
+        if not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        new = data
+        for s in secrets:
+            new = new.replace(s.encode(), b"REDACTED")
+        if new != data:
+            path.write_bytes(new)
+            changed += 1
+    return changed
+
+
 def host_uid_gid():
     """(uid, gid) to run containers as, or None on hosts without POSIX ids
     (Windows/Docker Desktop, where bind mounts aren't uid-checked anyway)."""

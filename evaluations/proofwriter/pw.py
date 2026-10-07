@@ -332,10 +332,11 @@ def backtranslate_answer(model: dict, run_path: Path, item: dict, image: str, re
         None, None, model["pi_model"], d / "reference", work / "trajectory.txt", work / "prompt.md", work / "out",
         image, container_name=container, add_host=True,
         extra_mounts=[(lf.KIT_DIR, "/kit"), (work / "attach", "/attach")],
-        writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=run_eval.PASSTHROUGH_KEYS)
+        writable_mounts=[(work / "session", "/session")], extra_env=env, passthrough_env=run_eval.route_keys(model))
     started = time.monotonic()
     with sems[model["route"]]:
         proc, _, used = tb.run_container_logged(cmd, container, run_eval.TIMEOUT_S, back / "attempt1.log")
+    utils.scrub_secrets(back)   # an agent running `env` would log the keys
     used = {**used, **tb.collect_context_log(work / "session", used, back / "attempt1.context.jsonl")}
     recon = work / "out" / "reconstruction.md"
     text = recon.read_text(encoding="utf-8") if recon.exists() else ""
